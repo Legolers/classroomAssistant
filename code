@@ -1,0 +1,144 @@
+#include <WiFi.h>
+#include <ESP32Servo.h>
+
+const char* ssid = "LAB";  
+const char* password = "tt1234tt";  
+
+WiFiServer server(80);
+
+// Ορισμός Servos και LED
+Servo headServo, eyesServo, mouthServo;
+const int headPin = 8;   // Κεφάλι
+const int eyesPin = 9;  // Μάτια
+const int mouthPin = 10; // Στόμα
+const int ledPin = 2;    // LED (Χέρι)
+
+int headAngle = 90;
+int eyesAngle = 90;
+int mouthAngle = 0;
+bool handUp = false; // LED αρχικά σβηστό (Χέρι κάτω)
+
+void setup() {
+    Serial.begin(115200);
+    delay(5000);
+    WiFi.begin(ssid, password);
+    Serial.print("Connecting to WiFi...");
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("\nConnected to WiFi");
+    Serial.print("Server IP: ");
+    Serial.println(WiFi.localIP());
+
+    server.begin();
+    Serial.println("Server started...");
+
+    headServo.attach(headPin);
+    eyesServo.attach(eyesPin);
+    mouthServo.attach(mouthPin);
+
+    pinMode(2, OUTPUT);
+    digitalWrite(2, LOW); // Χέρι κάτω αρχικά
+}
+
+void loop() {
+    WiFiClient client = server.available();
+    
+    if (client) {
+        Serial.println("Client Connected");
+        String request = client.readStringUntil('\r');
+        Serial.println("Request: " + request);
+        client.flush();
+
+        // Αντιστροφή Κεφαλιού (0° = Δεξιά, 180° = Αριστερά)
+        if (request.indexOf("/set?head=") >= 0) {
+            int val = request.substring(request.indexOf("=") + 1, request.indexOf("&")).toInt();
+            if (val >= 0 && val <= 180) {
+                headAngle = 180 - val;  // 🔄 Αντιστροφή τιμής
+                headServo.write(headAngle);
+                Serial.print("Κεφάλι (Δεξιά/Αριστερά): ");
+                Serial.println(headAngle);
+            }
+        } 
+        // Αντιστροφή Ματιών (0° = Δεξιά, 180° = Αριστερά)
+        if (request.indexOf("eyes=") >= 0) {
+            int val = request.substring(request.indexOf("eyes=") + 5, request.indexOf("&", request.indexOf("eyes="))).toInt();
+            if (val >= 0 && val <= 180) {
+                eyesAngle = 180 - val;  // 🔄 Αντιστροφή τιμής
+                eyesServo.write(eyesAngle);
+                Serial.print("Μάτια (Δεξιά/Αριστερά): ");
+                Serial.println(eyesAngle);
+            }
+        } 
+        // Κίνηση Στόματος (0° = Κλειστό, 90° = Ανοιχτό)
+        if (request.indexOf("mouth=") >= 0) {
+            int val = request.substring(request.indexOf("mouth=") + 6, request.indexOf("&", request.indexOf("mouth="))).toInt();
+            if (val >= 0 && val <= 90) {  
+                mouthAngle = val;
+                mouthServo.write(mouthAngle);
+                Serial.print("Στόμα (Ανοιχτό/Κλειστό): ");
+                Serial.println(mouthAngle);
+            }
+        }
+        // LED (Χέρι Πάνω/Κάτω)
+        if (request.indexOf("hand=up") >= 0) {
+            handUp = true;
+            digitalWrite(ledPin, HIGH);
+            Serial.println("Χέρι Πάνω (LED ON)");
+        } 
+        if (request.indexOf("hand=down") >= 0) {
+            handUp = false;
+            digitalWrite(ledPin, LOW);
+            Serial.println("Χέρι Κάτω (LED OFF)");
+        }
+
+        // HTML απάντηση με σωστά labels
+        client.println("HTTP/1.1 200 OK");
+        client.println("Content-Type: text/html");
+        client.println("Connection: close");
+        client.println();
+        client.println("<!DOCTYPE html><html><head>");
+        client.println("<meta charset=\"UTF-8\">");
+        client.println("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+        client.println("<title>Classmate Assistant</title>");
+        client.println("<style> body { font-family: Arial; text-align: center; margin-top: 50px; } ");
+        client.println("input { width: 300px; } button { font-size: 20px; margin: 10px; padding: 10px; } </style></head><body>");
+        client.println("<h2>Classmate Assistant</h2>");
+
+        // Sliders για τα Servos
+        client.println("<p>Κεφάλι (Αριστερά/Δεξιά): <span id=\"angle1\"></span>°</p>");
+        client.println("<input type=\"range\" min=\"0\" max=\"180\" value=\"" + String(180 - headAngle) + "\" id=\"head\" oninput=\"sendAngle('head', this.value)\">");
+        
+        client.println("<p>Μάτια (Αριστερά/Δεξιά): <span id=\"angle2\"></span>°</p>");
+        client.println("<input type=\"range\" min=\"0\" max=\"180\" value=\"" + String(180 - eyesAngle) + "\" id=\"eyes\" oninput=\"sendAngle('eyes', this.value)\">");
+        
+        client.println("<p>Στόμα (Ανοιχτό/Κλειστό): <span id=\"angle3\"></span>°</p>");
+        client.println("<input type=\"range\" min=\"0\" max=\"90\" value=\"" + String(mouthAngle) + "\" id=\"mouth\" oninput=\"sendAngle('mouth', this.value)\">");
+
+        // LED κουμπιά (Χέρι πάνω / κάτω)
+        client.println("<p><button onclick=\"sendHand('up')\">Χέρι Πάνω</button>");
+        client.println("<button onclick=\"sendHand('down')\">Χέρι Κάτω</button></p>");
+
+        // JavaScript για AJAX επικοινωνία
+        client.println("<script>");
+        client.println("function sendAngle(part, angle) {");
+        client.println("document.getElementById('angle' + (part == 'head' ? 1 : part == 'eyes' ? 2 : 3)).innerText = angle;");
+        client.println("var xhttp = new XMLHttpRequest();");
+        client.println("xhttp.open('GET', '/set?' + part + '=' + angle, true);");
+        client.println("xhttp.send(); }");
+
+        client.println("function sendHand(state) {");
+        client.println("var xhttp = new XMLHttpRequest();");
+        client.println("xhttp.open('GET', '/set?hand=' + state, true);");
+        client.println("xhttp.send(); }");
+        client.println("</script>");
+
+        client.println("</body></html>");
+
+        client.stop();
+        Serial.println("Client Disconnected");
+    }
+}
