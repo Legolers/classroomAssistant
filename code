@@ -1,8 +1,8 @@
 #include <WiFi.h>
 #include <ESP32Servo.h>
 
-const char* ssid = "LAB";  
-const char* password = "tt1234tt";  
+const char* ssid = "your_ssis";  
+const char* password = "your_psw";  
 
 WiFiServer server(80);
 
